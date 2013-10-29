@@ -190,6 +190,8 @@ public class BluetoothFtpService extends Service {
 
     private static final int NOTIFICATION_ID_AUTH = -1000006;
 
+    private static final int NOTIFICATION_ID_CONNECTED = -1000010;
+
     private static final int FTP_MEDIA_SCANNED = 4;
 
     private static final int FTP_MEDIA_SCANNED_FAILED = 5;
@@ -205,6 +207,8 @@ public class BluetoothFtpService extends Service {
     public static boolean isL2capSocket = false;
 
     private WakeLock mWakeLock;
+
+    private Notification mConnectedNotification = null;
 
     private BluetoothAdapter mAdapter;
 
@@ -612,7 +616,7 @@ public class BluetoothFtpService extends Service {
 
         @Override
         public void run() {
-            while (!stopped) {
+            while (!stopped && mRfcommServerSocket != null) {
                 try {
                     Log.v(RTAG,"Run Accept thread");
                     mConnSocket = mRfcommServerSocket.accept();
@@ -698,8 +702,13 @@ public class BluetoothFtpService extends Service {
                     break;
                 case MSG_SERVERSESSION_CLOSE:
                     stopObexServerSession();
+                    stopForeground(true);
+                    mConnectedNotification = null;
                     break;
                 case MSG_SESSION_ESTABLISHED:
+                    if(mConnectedNotification == null)
+                        mConnectedNotification = createFtpConnectedNotification();
+                    startForeground(NOTIFICATION_ID_CONNECTED, mConnectedNotification);
                     break;
                 case MSG_SESSION_DISCONNECTED:
                     break;
@@ -737,12 +746,9 @@ public class BluetoothFtpService extends Service {
                     break;
                 case MSG_INTERNAL_OBEX_RFCOMM_SESSION_UP:
                     if (VERBOSE) Log.v(TAG,"MSG_INTERNAL_OBEX_RFCOMM_SESSION_UP");
-                    try {
-                        closeRfcommSocket(true, false);
-                        mRfcommServerSocket = null;
-                    } catch (IOException ex) {
-                        Log.e(TAG, "CloseSocket error: " + ex);
-                    }
+                    /*Avoid RfcommServer socket close to avoid SDP
+                     *re-registration for every FTP connection request
+                     */
                     break;
                 case MSG_OBEX_AUTH_CHALL:
                     createFtpNotification(AUTH_CHALL_ACTION);
@@ -754,6 +760,18 @@ public class BluetoothFtpService extends Service {
             }
         }
     };
+   private Notification createFtpConnectedNotification() {
+        if (VERBOSE) Log.v(TAG, "Creating FTP access CONNECTED");
+
+        Notification notification = new Notification(android.R.drawable.stat_sys_data_bluetooth,
+            getString(R.string.ftp_notif_active_session), System.currentTimeMillis());
+        notification.setLatestEventInfo(this,  getString(R.string.ftp_notif_active_session),
+            getString( R.string.ftp_notif_connected , getRemoteDeviceName()), null);
+        notification.flags |= Notification.FLAG_AUTO_CANCEL;
+        notification.flags |= Notification.FLAG_ONLY_ALERT_ONCE;
+        notification.defaults = Notification.DEFAULT_SOUND;
+        return notification;
+    }
     private void createFtpNotification(String action) {
 
         NotificationManager nm = (NotificationManager)
@@ -776,9 +794,9 @@ public class BluetoothFtpService extends Service {
         if (action.equals(ACCESS_REQUEST_ACTION)) {
             deleteIntent.setAction(ACCESS_ALLOWED_ACTION);
             notification = new Notification(android.R.drawable.stat_sys_data_bluetooth,
-                getString(R.string.ftp_notif_ticker), System.currentTimeMillis());
-            notification.setLatestEventInfo(this, getString(R.string.ftp_notif_ticker),
-                    getString(R.string.ftp_notif_message, name), PendingIntent
+                getString(R.string.notif_ticker), System.currentTimeMillis());
+            notification.setLatestEventInfo(this, getString(R.string.notif_ticker),
+                    getString(R.string.notif_message, name), PendingIntent
                             .getActivity(this, 0, clickIntent, 0));
             notification.flags |= Notification.FLAG_AUTO_CANCEL;
             notification.flags |= Notification.FLAG_ONLY_ALERT_ONCE;
@@ -788,9 +806,9 @@ public class BluetoothFtpService extends Service {
         } else if (action.equals(AUTH_CHALL_ACTION)) {
             deleteIntent.setAction(AUTH_CANCELLED_ACTION);
             notification = new Notification(android.R.drawable.stat_sys_data_bluetooth,
-                getString(R.string.ftp_notif_ticker), System.currentTimeMillis());
+                getString(R.string.notif_ticker), System.currentTimeMillis());
             notification.setLatestEventInfo(this, getString(R.string.ftp_notif_title),
-                    getString(R.string.ftp_notif_message, name), PendingIntent
+                    getString(R.string.notif_message, name), PendingIntent
                             .getActivity(this, 0, clickIntent, 0));
 
             notification.flags |= Notification.FLAG_AUTO_CANCEL;
